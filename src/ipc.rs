@@ -96,7 +96,9 @@ pub async fn serve(
     handler: Handler,
     mut shutdown: tokio::sync::watch::Receiver<bool>,
 ) -> Result<()> {
+    use std::os::unix::fs::PermissionsExt;
     use tokio::net::UnixListener;
+
     let path = std::path::Path::new(name);
     if path.exists() {
         std::fs::remove_file(path).with_context(|| format!("remove stale socket {name}"))?;
@@ -104,7 +106,6 @@ pub async fn serve(
     let listener = UnixListener::bind(path).with_context(|| format!("bind Unix socket {name}"))?;
     // `~/.orbit` is private too, but explicitly securing the socket keeps the
     // IPC boundary correct even when a custom --home path has loose parents.
-    use std::os::unix::fs::PermissionsExt;
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
         .with_context(|| format!("secure Unix socket {name}"))?;
     loop {
