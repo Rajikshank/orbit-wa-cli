@@ -1,0 +1,5 @@
+/target/
+/.tools/
+/.orbit-*/
+/docs/
+*.log
