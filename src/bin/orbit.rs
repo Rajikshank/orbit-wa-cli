@@ -14,6 +14,7 @@ use orbit_core::{
     install, ipc,
     model::{Request, Response},
     store::Store,
+    tui,
     wacli::Wacli,
 };
 use serde_json::Value;
@@ -38,6 +39,8 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Open Orbit's interactive local WhatsApp control surface.
+    Ui,
     /// Initialize storage and install the checksum-verified wacli driver.
     Setup {
         #[arg(long)]
@@ -160,6 +163,13 @@ async fn run() -> Result<()> {
         .clone()
         .map_or_else(OrbitPaths::discover, |root| Ok(OrbitPaths::for_root(root)))?;
     match cli.command {
+        Command::Ui => {
+            if cli.json {
+                bail!("--json cannot be combined with the interactive `ui` command");
+            }
+            ensure_initialized(&paths)?;
+            tui::run(&paths).await
+        }
         Command::Setup {
             force_driver,
             wacli_path,
@@ -442,5 +452,12 @@ mod tests {
             }
             _ => panic!("wrong request"),
         }
+    }
+
+    #[test]
+    fn ui_is_a_first_class_cli_command() {
+        let cli = Cli::try_parse_from(["orbit", "ui"]).unwrap();
+        assert!(matches!(cli.command, Command::Ui));
+        assert!(!cli.json);
     }
 }

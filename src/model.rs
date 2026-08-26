@@ -23,6 +23,23 @@ pub struct NormalizedMessage {
     pub revoked: bool,
 }
 
+/// A bounded, privacy-local row for the TUI's Signal Stream. Keeping this
+/// contract typed prevents render code from depending on connector JSON shape.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct SignalEntry {
+    pub message_id: String,
+    pub chat_jid: String,
+    pub chat_name: String,
+    pub sender_name: String,
+    pub timestamp: String,
+    pub text: String,
+    pub content_kind: String,
+    pub filename: String,
+    pub from_me: bool,
+    pub edited: bool,
+    pub revoked: bool,
+}
+
 /// Commands are intentionally narrow. Raw arbitrary wacli execution is not
 /// exposed because it would bypass Orbit's safety and audit boundary.
 #[derive(Clone, Debug, Serialize, Deserialize)]

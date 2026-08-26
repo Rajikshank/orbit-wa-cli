@@ -10,7 +10,7 @@ use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
-use crate::model::NormalizedMessage;
+use crate::model::{NormalizedMessage, SignalEntry};
 
 #[derive(Clone, Debug)]
 pub struct Store {
@@ -107,6 +107,42 @@ impl Store {
         Ok(
             json!({"messages": messages, "source_events": events, "audited_actions":audited_actions, "database_bytes": bytes, "last_event_at": last_event}),
         )
+    }
+
+    /// Return only the newest bounded projection rows needed by the TUI. This
+    /// reads Orbit's own WAL-enabled database and never invokes the connector.
+    pub fn signal_stream(&self, limit: u32) -> Result<Vec<SignalEntry>> {
+        let conn = self.connect()?;
+        let mut statement = conn.prepare(
+            "SELECT external_id,chat_external_id,chat_name,sender_name,occurred_at,text,content_kind,filename,from_me,revoked,raw_json
+             FROM messages WHERE chat_external_id <> 'status@broadcast'
+             ORDER BY occurred_at DESC,id DESC LIMIT ?1",
+        )?;
+        let rows = statement.query_map([limit], |row| {
+            let raw: String = row.get(10)?;
+            let edited = serde_json::from_str::<Value>(&raw).is_ok_and(|value| {
+                value
+                    .get("Edited")
+                    .or_else(|| value.get("edited"))
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false)
+            });
+            Ok(SignalEntry {
+                message_id: row.get(0)?,
+                chat_jid: row.get(1)?,
+                chat_name: row.get(2)?,
+                sender_name: row.get(3)?,
+                timestamp: row.get(4)?,
+                text: row.get(5)?,
+                content_kind: row.get(6)?,
+                filename: row.get(7)?,
+                from_me: row.get(8)?,
+                revoked: row.get(9)?,
+                edited,
+            })
+        })?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .context("read Signal Stream")
     }
 
     /// Record an operator-visible mutation without storing message bodies or
@@ -410,5 +446,46 @@ mod tests {
         assert_eq!(store.ingest_batch(&page).unwrap(), 2);
         assert_eq!(store.ingest_batch(&page).unwrap(), 0);
         assert_eq!(store.stats().unwrap()["messages"], 2);
+    }
+
+    #[test]
+    fn signal_stream_is_newest_first_and_keeps_evidence_fields() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = Store::new(temp.path().join("orbit.db"));
+        store.initialize().unwrap();
+        let first = message();
+        let mut newest = message();
+        newest.external_id = "m2".into();
+        newest.chat_external_id = "team@g.us".into();
+        newest.chat_name = "Project Falcon".into();
+        newest.sender_name = "Priya".into();
+        newest.timestamp = "2026-08-26T09:42:00Z".into();
+        newest.text = "Should we move the launch?".into();
+        newest.edited = true;
+        let mut status = newest.clone();
+        status.external_id = "status".into();
+        status.chat_external_id = "status@broadcast".into();
+        status.timestamp = "2026-08-26T10:00:00Z".into();
+        store
+            .ingest("message.created", &json!({"ID":"m1"}), &first)
+            .unwrap();
+        store
+            .ingest("message.edited", &json!({"ID":"m2","Edited":true}), &newest)
+            .unwrap();
+        store
+            .ingest("message.created", &json!({"ID":"status"}), &status)
+            .unwrap();
+
+        let stream = store.signal_stream(20).unwrap();
+        assert_eq!(stream[0].message_id, "m2");
+        assert_eq!(stream[0].chat_jid, "team@g.us");
+        assert_eq!(stream[0].chat_name, "Project Falcon");
+        assert_eq!(stream[0].sender_name, "Priya");
+        assert!(stream[0].edited);
+        assert!(
+            stream
+                .iter()
+                .all(|entry| entry.chat_jid != "status@broadcast")
+        );
     }
 }

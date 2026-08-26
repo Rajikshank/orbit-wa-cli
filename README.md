@@ -136,6 +136,35 @@ orbit status
 
 ## Everyday usage
 
+### Interactive terminal interface
+
+```bash
+orbit ui
+```
+
+The TUI reads Orbit's local index and typed daemon API; repainting never launches the WhatsApp
+connector. It is designed for Windows Terminal and Linux terminals used on distributions such as
+CachyOS, with responsive layouts down to 60×18 cells. Regular commands remain the automation-safe
+interface and `orbit ui` refuses redirected input/output or `--json`.
+
+| Key | Action |
+| --- | --- |
+| `j` / `k`, arrows, Page Up/Down, Home/End | Move through the Signal Stream |
+| `/` | Search the complete local message index |
+| `Enter` or `c` | Compose to the selected conversation |
+| `F10` or `Ctrl+S` in the composer | Send the message; uncertain sends are never retried |
+| `Enter` | Insert a newline in the composer |
+| `t`, then `1`–`5` | Select Midnight Indigo, Arctic Light, Ember, Moss, or High Contrast |
+| `p` | Toggle Privacy Curtain to mask names and message bodies |
+| `?` or `Ctrl+P` | Open keyboard help |
+| `q` | Close the UI without stopping background sync |
+
+Mouse clicks select visible signals and working navigation actions; the wheel moves through the
+stream. `Ctrl+C` safely restores the terminal and exits from any screen.
+
+The chosen theme is retained in `~/.orbit/ui-theme`. Icons use terminal-safe Unicode and every
+state also has a text label, so color and enhanced fonts are optional.
+
 ### Browse and search
 
 ```bash

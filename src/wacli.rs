@@ -70,7 +70,10 @@ impl Wacli {
     pub async fn authenticate(&self) -> Result<()> {
         self.ensure_compatible().await?;
         let status = self
-            .base_command()
+            // Pairing is the one driver operation that must inherit Orbit's
+            // terminal. Every daemon-owned operation uses base_command
+            // so Windows never flashes a transient console window.
+            .interactive_command()
             .args(authentication_arguments())
             .stdin(Stdio::inherit())
             .stdout(Stdio::inherit())
@@ -222,9 +225,29 @@ impl Wacli {
     fn base_command(&self) -> Command {
         let mut command = Command::new(&self.binary);
         command.arg("--store").arg(&self.store);
+        configure_background(&mut command);
+        command
+    }
+
+    fn interactive_command(&self) -> Command {
+        let mut command = Command::new(&self.binary);
+        command.arg("--store").arg(&self.store);
         command
     }
 }
+
+/// A detached Windows daemon has no console to inherit. Without
+/// `CREATE_NO_WINDOW`, every console-subsystem driver child receives a new
+/// transient conhost window. Keep this flag away from interactive QR pairing.
+#[cfg(windows)]
+fn configure_background(command: &mut Command) {
+    use windows_sys::Win32::System::Threading::CREATE_NO_WINDOW;
+
+    command.creation_flags(CREATE_NO_WINDOW);
+}
+
+#[cfg(not(windows))]
+fn configure_background(_command: &mut Command) {}
 
 /// `terminal` asks wacli to render an actual scannable QR. Its `text` mode is
 /// intentionally the raw `https://wa.me/...` payload for external renderers and
