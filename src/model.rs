@@ -40,6 +40,21 @@ pub struct SignalEntry {
     pub revoked: bool,
 }
 
+/// One conversation row for the chat-first TUI. The latest message fields are
+/// deliberately projected by the store so rendering never has to understand
+/// connector-specific JSON or scan the full message history.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct ConversationEntry {
+    pub chat_jid: String,
+    pub chat_name: String,
+    pub last_message_id: String,
+    pub last_timestamp: String,
+    pub last_sender_name: String,
+    pub preview: String,
+    pub from_me: bool,
+    pub message_count: u64,
+}
+
 /// Commands are intentionally narrow. Raw arbitrary wacli execution is not
 /// exposed because it would bypass Orbit's safety and audit boundary.
 #[derive(Clone, Debug, Serialize, Deserialize)]

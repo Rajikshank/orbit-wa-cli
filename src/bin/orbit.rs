@@ -40,7 +40,11 @@ struct Cli {
 #[derive(Subcommand)]
 enum Command {
     /// Open Orbit's interactive local WhatsApp control surface.
-    Ui,
+    Ui {
+        /// Open with fictional local data for screenshots and evaluation.
+        #[arg(long)]
+        demo: bool,
+    },
     /// Initialize storage and install the checksum-verified wacli driver.
     Setup {
         #[arg(long)]
@@ -163,12 +167,17 @@ async fn run() -> Result<()> {
         .clone()
         .map_or_else(OrbitPaths::discover, |root| Ok(OrbitPaths::for_root(root)))?;
     match cli.command {
-        Command::Ui => {
+        Command::Ui { demo } => {
             if cli.json {
                 bail!("--json cannot be combined with the interactive `ui` command");
             }
-            ensure_initialized(&paths)?;
-            tui::run(&paths).await
+            // Demo mode is an in-memory, non-sending visual sandbox. Keeping it
+            // independent of setup makes documentation capture and terminal
+            // compatibility checks safe on clean machines.
+            if !demo {
+                ensure_initialized(&paths)?;
+            }
+            tui::run(&paths, demo).await
         }
         Command::Setup {
             force_driver,
@@ -457,7 +466,7 @@ mod tests {
     #[test]
     fn ui_is_a_first_class_cli_command() {
         let cli = Cli::try_parse_from(["orbit", "ui"]).unwrap();
-        assert!(matches!(cli.command, Command::Ui));
+        assert!(matches!(cli.command, Command::Ui { demo: false }));
         assert!(!cli.json);
     }
 }

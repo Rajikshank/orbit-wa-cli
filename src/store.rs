@@ -10,7 +10,7 @@ use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
-use crate::model::{NormalizedMessage, SignalEntry};
+use crate::model::{ConversationEntry, NormalizedMessage, SignalEntry};
 
 #[derive(Clone, Debug)]
 pub struct Store {
@@ -145,6 +145,78 @@ impl Store {
             .context("read Signal Stream")
     }
 
+    /// Return one latest-message projection per conversation. Window
+    /// functions keep the query bounded and avoid N+1 reads when the inbox
+    /// refreshes every few seconds.
+    pub fn conversation_list(&self, limit: u32) -> Result<Vec<ConversationEntry>> {
+        let conn = self.connect()?;
+        let mut statement = conn.prepare(
+            "WITH ranked AS (
+               SELECT external_id, chat_external_id, chat_name, sender_name,
+                      occurred_at, from_me, text, content_kind, filename, revoked,
+                      count(*) OVER (PARTITION BY chat_external_id) AS message_count,
+                      row_number() OVER (
+                        PARTITION BY chat_external_id ORDER BY occurred_at DESC, id DESC
+                      ) AS position
+               FROM messages WHERE chat_external_id <> 'status@broadcast'
+             )
+             SELECT external_id, chat_external_id, chat_name, sender_name,
+                    occurred_at, from_me, text, content_kind, filename, revoked,
+                    message_count
+             FROM ranked WHERE position=1
+             ORDER BY occurred_at DESC LIMIT ?1",
+        )?;
+        let rows = statement.query_map([limit], |row| {
+            let text: String = row.get(6)?;
+            let content_kind: String = row.get(7)?;
+            let filename: String = row.get(8)?;
+            let revoked: bool = row.get(9)?;
+            let preview = if revoked {
+                "Message revoked".to_owned()
+            } else if !filename.is_empty() {
+                filename
+            } else if !text.is_empty() {
+                text
+            } else if content_kind.is_empty() {
+                "Message".to_owned()
+            } else {
+                content_kind
+            };
+            Ok(ConversationEntry {
+                last_message_id: row.get(0)?,
+                chat_jid: row.get(1)?,
+                chat_name: row.get(2)?,
+                last_sender_name: row.get(3)?,
+                last_timestamp: row.get(4)?,
+                from_me: row.get(5)?,
+                preview,
+                message_count: u64::try_from(row.get::<_, i64>(10)?).unwrap_or_default(),
+            })
+        })?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .context("read conversation inbox")
+    }
+
+    /// Read the newest bounded page for one conversation in chronological
+    /// order. The inner query bounds disk work; the outer query gives the TUI a
+    /// natural oldest-to-newest transcript.
+    pub fn conversation_messages(&self, chat_jid: &str, limit: u32) -> Result<Vec<SignalEntry>> {
+        let conn = self.connect()?;
+        let mut statement = conn.prepare(
+            "SELECT external_id,chat_external_id,chat_name,sender_name,occurred_at,
+                    text,content_kind,filename,from_me,revoked,raw_json
+             FROM (
+               SELECT id,external_id,chat_external_id,chat_name,sender_name,occurred_at,
+                      text,content_kind,filename,from_me,revoked,raw_json
+               FROM messages WHERE chat_external_id=?1
+               ORDER BY occurred_at DESC,id DESC LIMIT ?2
+             ) ORDER BY occurred_at ASC,id ASC",
+        )?;
+        let rows = statement.query_map(params![chat_jid, limit], signal_from_row)?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .context("read conversation transcript")
+    }
+
     /// Record an operator-visible mutation without storing message bodies or
     /// attachment contents in the audit trail.
     pub fn record_action(
@@ -186,6 +258,30 @@ impl Store {
     pub fn path(&self) -> &Path {
         &self.path
     }
+}
+
+fn signal_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SignalEntry> {
+    let raw_json: String = row.get(10)?;
+    let edited = serde_json::from_str::<Value>(&raw_json).is_ok_and(|value| {
+        value
+            .get("Edited")
+            .or_else(|| value.get("edited"))
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+    });
+    Ok(SignalEntry {
+        message_id: row.get(0)?,
+        chat_jid: row.get(1)?,
+        chat_name: row.get(2)?,
+        sender_name: row.get(3)?,
+        timestamp: row.get(4)?,
+        text: row.get(5)?,
+        content_kind: row.get(6)?,
+        filename: row.get(7)?,
+        from_me: row.get(8)?,
+        revoked: row.get(9)?,
+        edited,
+    })
 }
 
 fn ingest_transaction(
@@ -487,5 +583,34 @@ mod tests {
                 .iter()
                 .all(|entry| entry.chat_jid != "status@broadcast")
         );
+    }
+
+    #[test]
+    fn conversation_projection_groups_inbox_and_orders_transcript() {
+        let temp = tempfile::tempdir().unwrap();
+        let store = Store::new(temp.path().join("orbit.db"));
+        store.initialize().unwrap();
+        let mut first = message();
+        first.timestamp = "2026-08-28T09:00:00Z".into();
+        let mut latest = first.clone();
+        latest.external_id = "m2".into();
+        latest.timestamp = "2026-08-28T10:00:00Z".into();
+        latest.text = "latest preview".into();
+        store
+            .ingest("message.created", &json!({"ID":"m1"}), &first)
+            .unwrap();
+        store
+            .ingest("message.created", &json!({"ID":"m2"}), &latest)
+            .unwrap();
+
+        let inbox = store.conversation_list(10).unwrap();
+        assert_eq!(inbox.len(), 1);
+        assert_eq!(inbox[0].preview, "latest preview");
+        assert_eq!(inbox[0].message_count, 2);
+        let transcript = store
+            .conversation_messages(&first.chat_external_id, 10)
+            .unwrap();
+        assert_eq!(transcript[0].message_id, "m1");
+        assert_eq!(transcript[1].message_id, "m2");
     }
 }

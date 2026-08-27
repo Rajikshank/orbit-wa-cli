@@ -8,6 +8,8 @@
 
 Orbit pairs as a WhatsApp linked device, mirrors messages into an Orbit-owned SQLite database, and exposes safe commands for people and scripts. Your session, message index, and audit trail stay on your computer.
 
+![Orbit conversation-first terminal interface](assets/orbit-tui.png)
+
 > Orbit is an independent, unofficial project. It is not affiliated with, endorsed by, or sponsored by WhatsApp or Meta. Use it responsibly and never for spam or unsolicited messaging.
 
 ## Why Orbit?
@@ -33,6 +35,8 @@ This repository intentionally contains the WhatsApp phase only. It does not incl
 | Text, images, video, audio, files, and voice notes | ✓ |
 | On-demand media download | ✓ |
 | Diagnostics, statistics, reconciliation, and audit records | ✓ |
+| Conversation-first terminal interface | ✓ |
+| WhatsApp voice and video calls | Experimental research; not implemented |
 | Multi-account profiles | Not yet |
 
 ## How it works
@@ -142,28 +146,46 @@ orbit status
 orbit ui
 ```
 
-The TUI reads Orbit's local index and typed daemon API; repainting never launches the WhatsApp
-connector. It is designed for Windows Terminal and Linux terminals used on distributions such as
-CachyOS, with responsive layouts down to 60×18 cells. Regular commands remain the automation-safe
-interface and `orbit ui` refuses redirected input/output or `--json`.
+The conversation-first TUI reads Orbit's local index and typed daemon API; repainting never launches
+the WhatsApp connector. It is designed for Windows Terminal and Linux terminals used on
+distributions such as CachyOS, with responsive layouts down to 60×18 cells. Try the complete UI
+without touching your account or sending anything:
+
+```bash
+orbit ui --demo
+```
+
+Regular commands remain the automation-safe interface. `orbit ui` refuses redirected input/output
+and `--json` so terminal state is always restored safely.
 
 | Key | Action |
 | --- | --- |
-| `j` / `k`, arrows, Page Up/Down, Home/End | Move through the Signal Stream |
-| `/` | Search the complete local message index |
-| `Enter` or `c` | Compose to the selected conversation |
+| `j` / `k`, arrows, Page Up/Down, Home/End | Move through conversations or messages |
+| `0`–`9` | Jump directly to a visible conversation |
+| `/` or `F2` | Search conversations as you type |
+| `Enter` | Open the selected conversation |
+| `c` or `F3` | Focus the multiline composer |
 | `F10` or `Ctrl+S` in the composer | Send the message; uncertain sends are never retried |
-| `Enter` | Insert a newline in the composer |
-| `t`, then `1`–`5` | Select Midnight Indigo, Arctic Light, Ember, Moss, or High Contrast |
+| `Enter` in the composer | Insert a newline |
+| `t` or `F6`, then `1`–`5` | Select Graphite Violet, Arctic Light, Ember, Moss, or High Contrast |
+| `v` | Show voice-call readiness without starting a call |
 | `p` | Toggle Privacy Curtain to mask names and message bodies |
-| `?` or `Ctrl+P` | Open keyboard help |
-| `q` | Close the UI without stopping background sync |
+| `?` or `F1` | Open keyboard help |
+| `q` or `Ctrl+C` | Close the UI without stopping background sync |
 
-Mouse clicks select visible signals and working navigation actions; the wheel moves through the
-stream. `Ctrl+C` safely restores the terminal and exits from any screen.
+Mouse clicks select the inbox, search field, and composer; the wheel moves through the active pane.
+The chosen theme is retained in `~/.orbit/ui-theme`. Every colored state also has a text label, so
+enhanced fonts and color are optional.
 
-The chosen theme is retained in `~/.orbit/ui-theme`. Icons use terminal-safe Unicode and every
-state also has a text label, so color and enhanced fonts are optional.
+### Calling compatibility
+
+Orbit deliberately shows **Voice beta: not paired** instead of exposing a button that cannot work.
+The pinned `wacli` connector currently stores call metadata but cannot place, answer, or reject a
+call. Real-time voice is technically feasible through the experimental
+[MeowCaller](https://github.com/purpshell/meowcaller) stack, but it requires a separate paired
+session and has no stable tagged release. Orbit therefore reserves a compatible status surface and
+keyboard action while keeping calling disabled until that integration can meet the same reliability,
+privacy, and cross-platform test bar as messaging.
 
 ### Browse and search
 
